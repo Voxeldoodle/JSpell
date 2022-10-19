@@ -1,21 +1,27 @@
-import org.apache.commons.collections4.Trie;
-import org.apache.commons.collections4.trie.PatriciaTrie;
+import org.apache.commons.lang3.stream.Streams;
 
+import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 public class JSpell {
-    private TrieNode prefixTreeRoot;
-    private List<LogCluster> cluster;
-    private String logformat;
+    TrieNode prefixTreeRoot;
+    List<LogCluster> cluster;
+    String logformat;
     private float tau;
 
     private final Logger logger = Logger.getLogger(JSpell.class.getName());
 
-    private Map<String, List> dataframe;
-    private Pattern regex;
+    Map<String, List> dataframe;
+    Pattern regex;
+
+    JSpell() {
+    }
 
     public JSpell(String logformat, float tau) {
         this.prefixTreeRoot = new TrieNode();
@@ -128,7 +134,7 @@ public class JSpell {
             parentn.cluster = newCluster;
     }
 
-    private LogCluster LCSMatch(List<LogCluster> cluster, List<String> logMsg) {
+    LogCluster LCSMatch(List<LogCluster> cluster, List<String> logMsg) {
         LogCluster res = null;
         var msgSet = new HashSet<>(logMsg);
         var msgLen = logMsg.size();
@@ -156,7 +162,7 @@ public class JSpell {
         return res;
     }
 
-    private List<String> LCS(List<String> seq1, List<String> seq2) {
+    List<String> LCS(List<String> seq1, List<String> seq2) {
         int[][] lengths = new int[seq1.size()+1][seq2.size()+1];
         for (int i = 0; i < seq1.size(); i++) {
             for (int j = 0; j < seq2.size(); j++) {
@@ -174,16 +180,17 @@ public class JSpell {
                 lenOfSeq1--;
             else if (lengths[lenOfSeq1][lenOfSeq2] == lengths[lenOfSeq1][lenOfSeq2-1])
                 lenOfSeq2--;
-            else
+            else{
                 assert (seq1.get(lenOfSeq1-1).equals(seq2.get(lenOfSeq2-1)));
                 result.add(0, seq1.get(lenOfSeq1-1));
                 lenOfSeq1--;
                 lenOfSeq2--;
+            }
         }
         return result;
     }
 
-    private LogCluster simpleLoopMatch(List<LogCluster> cluster, List<String> constLogMsg) {
+    LogCluster simpleLoopMatch(List<LogCluster> cluster, List<String> constLogMsg) {
         for (LogCluster logCluster : cluster) {
             if (logCluster.getTemplate().size() < .5 * constLogMsg.size())
                 continue;
@@ -210,7 +217,7 @@ public class JSpell {
         return null;
     }
 
-    private void loadDataframe(List<String> log){
+    void loadDataframe(List<String> log){
         int count = 0;
         int total = log.size();
 //        var messages = new ArrayList<List<String>>();
@@ -240,18 +247,18 @@ public class JSpell {
         dataframe.put("LineID", numbers);
     }
 
-    private void generateLogformatRegex(String logformat){
+    void generateLogformatRegex(String logformat){
 //        Function to generate regular expression to split log messages
         var headers = new ArrayList<String>();
-        var splitters = logformat.split("(<[^<>]+>)");
+        var splitters = logformat.strip().split("(?=(<[^<>]+>))|(?<=(<[^<>]+>))");
         StringBuilder regex = new StringBuilder();
         for (int k = 0; k < splitters.length; k++){
-            if (k % 2 == 0){
+            if (k % 2 == 1){
                 var splitter = splitters[k].replaceAll("\\ +", " ");
                 regex.append(splitter);
             }else {
-                var header = splitters[k].strip().replace("<|>", "");
-                regex.append(String.format("(?P<%s>.*?)",header));
+                var header = splitters[k].strip().replaceAll("<|>", "");
+                regex.append(String.format("(?<%s>.*?)",header));
                 headers.add(header);
             }
         }
@@ -260,6 +267,20 @@ public class JSpell {
         for (var h :headers) {
             dataframe.put(h, new ArrayList<String>());
         }
+    }
+
+    void dataframeToCsv(Path path){
+        var keys = dataframe.keySet();
+        for (int i = 0; i < dataframe.entrySet().iterator().next().getValue().size(); i++) {
+            var row = new StringBuilder();
+            for (String key : keys) {
+                row.append(dataframe.get(key).get(i)+ ", ");
+            }
+            row.delete(row.length() -2, row.length());
+            row.toString();
+        }
+
+
     }
 
 }
