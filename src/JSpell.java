@@ -1,6 +1,5 @@
 import org.apache.commons.collections4.Trie;
 import org.apache.commons.collections4.trie.PatriciaTrie;
-import org.apache.commons.text.similarity.LongestCommonSubsequence;
 
 import java.util.*;
 import java.util.logging.Level;
@@ -9,12 +8,10 @@ import java.util.regex.Pattern;
 
 public class JSpell {
     private Trie<String, LogCluster> trie;
-    private Node prefixTreeRoot;
+    private TrieNode prefixTreeRoot;
     private List<LogCluster> cluster;
     private String logformat;
     private float tau;
-
-    private final LongestCommonSubsequence lcs = new LongestCommonSubsequence();
 
     private final Logger logger = Logger.getLogger(JSpell.class.getName());
 
@@ -23,7 +20,7 @@ public class JSpell {
 
     public JSpell(String logformat, float tau) {
         this.trie = new PatriciaTrie<>();
-        this.prefixTreeRoot = new Node();
+        this.prefixTreeRoot = new TrieNode();
         this.cluster = new ArrayList<>();
         this.logformat = logformat;
         this.tau = tau;
@@ -38,24 +35,177 @@ public class JSpell {
 
         for (int i=0; i < content.size(); i++){
             int logID = i;
-            var msg = Arrays.stream(content.get(i).split("[\\s=:,]"))
+            var logMsg = Arrays.stream(content.get(i).split("[\\s=:,]"))
                     .filter(x-> !x.isEmpty())
                     .toList();
-            var constLogMsg = msg.stream().filter(x -> !x.equals("<*>")).toList();
+            var constLogMsg = logMsg.stream().filter(x -> !x.equals("<*>")).toList();
 
             var matchCluster = prefixTreeMatch(prefixTreeRoot, constLogMsg, 0);
+            if (matchCluster == null){
+                matchCluster = simpleLoopMatch(this.cluster, constLogMsg);
+                if (matchCluster == null){
+                    matchCluster = LCSMatch(this.cluster, logMsg);
+                    if (matchCluster == null){
+                        var ids = new ArrayList<Integer>();
+                        ids.add(logID);
+                        var newCluster = new LogCluster(logMsg,  ids);
+                        this.cluster.add(newCluster);
+                        addSeqToPrefixTree(prefixTreeRoot, newCluster);
+                    }else{
+                        var newTemplate = getTemplate(LCS(logMsg, matchCluster.getTemplate()));
+                        if (!newTemplate.equals(matchCluster.getTemplate())){
+                            removeSeqFromPrefixTree(prefixTreeRoot, matchCluster);
+                        }
+                    }
+                }
+            }
+            if (matchCluster != null){
+                for (int j = 0; j < cluster.size(); j++) {
+                    if (matchCluster.getTemplate().equals(cluster.get(j).getTemplate()))
+                        cluster.get(j).ids.add(logID);
+                    break;
+                }
+            }
+            if (i % 100 == 0){
+//                Get time to check 10 min interval for logging purposes
+            }
+            if (i % 10000 == 0 || i == content.size() ){
+                logger.log(Level.INFO, String.format("Processed %.2f%% of log lines.", 100*i/content.size()));
+            }
         }
 
     }
 
-    private LogCluster[] prefixTreeMatch(Node prefixTree, List<String> constLogMsg, int start) {
+    private void removeSeqFromPrefixTree(TrieNode prefixTreeRoot, LogCluster newCluster) {
+        var parentn = prefixTreeRoot;
+        var seq = newCluster.getTemplate().stream().filter(x -> !x.equals("<*>")).toList();
+        for (String tok : seq) {
+            if (parentn.child.containsKey(tok)){
+                var matched = parentn.child.get(tok);
+                if (matched.templateNo == 1){
+                    parentn.child.remove(tok);
+                    break;
+                }else {
+                    matched.templateNo--;
+                    parentn = matched;
+                }
+            }
+        }
+    }
+
+    private List<String> getTemplate(List<String> lcs) {
+        var res = new ArrayList<String>();
+        if (lcs.isEmpty())
+            return res;
+
+        Collections.reverse(lcs);
+        int i = 0;
+        for (String tok : lcs) {
+            i++;
+            if (tok.equals(lcs.get(lcs.size() - 1))){
+                res.add(tok);
+                lcs.remove(lcs.size() - 1);
+            }else
+                res.add("<*>");
+            if (lcs.isEmpty())
+                break;
+        }
+        if (i < lcs.size())
+            res.add("<*>");
+        return res;
+    }
+
+    private void addSeqToPrefixTree(TrieNode prefixTreeRoot, LogCluster newCluster) {
+        var parentn = prefixTreeRoot;
+        var seq = newCluster.getTemplate().stream().filter(x -> !x.equals("<*>")).toList();
+        for (String tok : seq) {
+            if (parentn.child.containsKey(tok))
+                parentn.child.get(tok).templateNo ++;
+            else
+                parentn.child.put(tok, new TrieNode(tok, 1));
+            parentn = parentn.child.get(tok);
+        }
+        if (parentn == null)
+            parentn.cluster = newCluster;
+    }
+
+    private LogCluster LCSMatch(List<LogCluster> cluster, List<String> logMsg) {
+        LogCluster res = null;
+        var msgSet = new HashSet<String>(logMsg);
+        var msgLen = logMsg.size();
+        var maxLen = -1;
+        LogCluster maxLCS = null;
+
+        for (LogCluster logCluster : cluster) {
+            var tempSet = new HashSet<String>(logCluster.getTemplate());
+            tempSet.retainAll(tempSet);
+            if (tempSet.size() < .5 * msgLen)
+                continue;
+            var lcs = LCS(logMsg, logCluster.getTemplate());
+            var lenLcs = lcs.size();
+            if (lenLcs > maxLen ||
+                    (lenLcs == maxLen &&
+                            logCluster.getTemplate().size() < maxLCS.getTemplate().size())){
+                maxLen = lenLcs;
+                maxLCS = logCluster;
+            }
+        }
+
+        if (maxLen >= tau * msgLen)
+            res = maxLCS;
+
+        return res;
+    }
+
+    private List<String> LCS(List<String> seq1, List<String> seq2) {
+        int[][] lengths = new int[seq1.size()+1][seq2.size()+1];
+        for (int i = 0; i < seq1.size(); i++) {
+            for (int j = 0; j < seq2.size(); j++) {
+                if (seq1.get(i).equals(seq2.get(j)))
+                    lengths[i+1][j+1] = lengths[i][j]+1;
+                else
+                    lengths[i+1][j+1] = Integer.max(lengths[i+1][j], lengths[i][j+1]);
+            }
+        }
+        var result = new ArrayList<String>();
+        var lenOfSeq1= seq1.size();
+        var lenOfSeq2 = seq2.size();
+        while (lenOfSeq1 != 0 && lenOfSeq2 != 0){
+            if (lengths[lenOfSeq1][lenOfSeq2] == lengths[lenOfSeq1-1][lenOfSeq2])
+                lenOfSeq1--;
+            else if (lengths[lenOfSeq1][lenOfSeq2] == lengths[lenOfSeq1][lenOfSeq2-1])
+                lenOfSeq2--;
+            else
+                assert (seq1.get(lenOfSeq1-1).equals(seq2.get(lenOfSeq2-1)));
+                result.add(0, seq1.get(lenOfSeq1-1));
+                lenOfSeq1--;
+                lenOfSeq2--;
+        }
+        return result;
+    }
+
+    private LogCluster simpleLoopMatch(List<LogCluster> cluster, List<String> constLogMsg) {
+        for (LogCluster logCluster : cluster) {
+            if (logCluster.getTemplate().size() < .5 * constLogMsg.size())
+                continue;
+            var tokenSet = new HashSet<String>(constLogMsg);
+            if (constLogMsg.stream().allMatch(x -> x == "<*>" || tokenSet.contains(x)))
+                return logCluster;
+        }
+        return null;
+    }
+
+    private LogCluster prefixTreeMatch(TrieNode prefixTree, List<String> constLogMsg, int start) {
         for (int i = start; i < constLogMsg.size(); i++) {
             if (prefixTree.child.containsKey(constLogMsg.get(i))){
                 var child = prefixTree.child.get(constLogMsg.get(i));
-                if (child.cluster.getTemplate() != null){
-                    
+                var tmp = child.cluster.getTemplate();
+                if (tmp != null){
+                    var constLM = tmp.stream().filter(x -> !x.equals("<*>")).toList();
+                    if (constLM.size() >= tau * constLogMsg.size())
+                        return child.cluster;
                 }else
-                    prefixTreeMatch(child, constLogMsg, i+1)
+                    prefixTreeMatch(child, constLogMsg, i+1);
             }
         }
         return null;
@@ -113,47 +263,51 @@ public class JSpell {
         }
     }
 
-
-
 }
 
 /**
  * Class object to store a log group with the same template
  */
 class LogCluster{
-    String template;
+    List<String> template;
 
-    int id;
+    List<Integer> ids;
 
-    public LogCluster(String template, int id) {
+    public LogCluster(List<String> template, List<Integer> ids) {
         this.template = template;
-        this.id = id;
+        this.ids = ids;
     }
 
-    public String getTemplate() {
+    public List<String> getTemplate() {
         return template;
     }
 
-    public void setTemplate(String template) {
+    public void setTemplate(List<String> template) {
         this.template = template;
     }
 
-    public int getId() {
-        return id;
+    public List<Integer> getIds() {
+        return ids;
     }
 
-    public void setId(int id) {
-        this.id = id;
+    public void setIds(List<Integer> ids) {
+        this.ids = ids;
     }
 }
 
-class Node {
+class TrieNode {
     LogCluster cluster;
     String token;
     int templateNo;
-    Map<String, Node> child;
+    Map<String, TrieNode> child;
 
-    public Node() {
+    public TrieNode() {
+        this.child = new HashMap<>();
+    }
+
+    public TrieNode(String token, int templateNo) {
+        this.token = token;
+        this.templateNo = templateNo;
         this.child = new HashMap<>();
     }
 }

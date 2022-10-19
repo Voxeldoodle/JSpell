@@ -7,7 +7,7 @@ public class Main {
 //        LongestCommonSubsequence pippo = new LongestCommonSubsequence();
 //        var test = pippo.apply("Superawesome", "Super");
 //        System.out.println(test);
-        var map = new HashMap<String, Integer>();
-        System.out.println(map.get("pippo"));
+//        var map = new HashMap<String, Integer>();
+//        System.out.println(map.get("pippo"));
     }
 }
