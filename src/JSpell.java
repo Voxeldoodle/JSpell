@@ -7,7 +7,6 @@ import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 public class JSpell {
-    private Trie<String, LogCluster> trie;
     private TrieNode prefixTreeRoot;
     private List<LogCluster> cluster;
     private String logformat;
@@ -19,7 +18,6 @@ public class JSpell {
     private Pattern regex;
 
     public JSpell(String logformat, float tau) {
-        this.trie = new PatriciaTrie<>();
         this.prefixTreeRoot = new TrieNode();
         this.cluster = new ArrayList<>();
         this.logformat = logformat;
@@ -60,10 +58,11 @@ public class JSpell {
                 }
             }
             if (matchCluster != null){
-                for (int j = 0; j < cluster.size(); j++) {
-                    if (matchCluster.getTemplate().equals(cluster.get(j).getTemplate()))
-                        cluster.get(j).ids.add(logID);
-                    break;
+                for (LogCluster logCluster : cluster) {
+                    if (matchCluster.getTemplate().equals(logCluster.getTemplate())) {
+                        logCluster.ids.add(logID);
+                        break;
+                    }
                 }
             }
             if (i % 100 == 0){
@@ -125,20 +124,20 @@ public class JSpell {
                 parentn.child.put(tok, new TrieNode(tok, 1));
             parentn = parentn.child.get(tok);
         }
-        if (parentn == null)
+        if (parentn.cluster == null)
             parentn.cluster = newCluster;
     }
 
     private LogCluster LCSMatch(List<LogCluster> cluster, List<String> logMsg) {
         LogCluster res = null;
-        var msgSet = new HashSet<String>(logMsg);
+        var msgSet = new HashSet<>(logMsg);
         var msgLen = logMsg.size();
         var maxLen = -1;
         LogCluster maxLCS = null;
 
         for (LogCluster logCluster : cluster) {
-            var tempSet = new HashSet<String>(logCluster.getTemplate());
-            tempSet.retainAll(tempSet);
+            var tempSet = new HashSet<>(logCluster.getTemplate());
+            tempSet.retainAll(msgSet);
             if (tempSet.size() < .5 * msgLen)
                 continue;
             var lcs = LCS(logMsg, logCluster.getTemplate());
@@ -188,8 +187,8 @@ public class JSpell {
         for (LogCluster logCluster : cluster) {
             if (logCluster.getTemplate().size() < .5 * constLogMsg.size())
                 continue;
-            var tokenSet = new HashSet<String>(constLogMsg);
-            if (constLogMsg.stream().allMatch(x -> x == "<*>" || tokenSet.contains(x)))
+            var tokenSet = new HashSet<>(constLogMsg);
+            if (constLogMsg.stream().allMatch(x -> x.equals("<*>") || tokenSet.contains(x)))
                 return logCluster;
         }
         return null;
