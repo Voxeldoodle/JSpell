@@ -250,7 +250,7 @@ public class JSpell {
     void generateLogformatRegex(String logformat){
 //        Function to generate regular expression to split log messages
         var headers = new ArrayList<String>();
-        var splitters = logformat.strip().split("(?=(<[^<>]+>))|(?<=(<[^<>]+>))");
+        var splitters = logformat.strip().split("(?=(<[^<>]))|(?<=([^<>]>))");
         StringBuilder regex = new StringBuilder();
         for (int k = 0; k < splitters.length; k++){
             if (k % 2 == 1){
